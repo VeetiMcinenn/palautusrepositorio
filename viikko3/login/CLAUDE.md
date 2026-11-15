@@ -1,58 +1,31 @@
-# CLAUDE.md
+Minkälaisen ohjetiedoston agentti generoi, ja mitä jouduit korjaamaan?
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Projektissa ei ollut ohjetiedostoa storyjen toteutuksen aikana. Generoin CLAUDE.md:n /init-komennolla vasta raporttia varten. Siitä tuli lyhyt, kaksiosainen: Commands (sovelluksen käynnistys porttiin 5000, testien ajo kokonaisuutena, yhden suiten ja yhden testin ajo, HEADLESS-muuttuja) ja Architecture (kolmikerroksinen rakenne app.py → user_service → user_repository, virheviestien kulku flash-viesteinä, AppLibrary.py:n tapa nollata tila /tests/reset-reitin kautta). Tärkein kohta on varoitus porttiristiriidasta: index.py käynnistää sovelluksen porttiin 5001, testit odottavat 5000:aa. Juuri tähän agentti itse kompastui.
 
-## Commands
+Korjattavaa ei juuri ollut, koska tiedosto perustuu koodiin, jonka agentti oli juuri lukenut. Tarkistin kaksi väitettä erikseen: pre-commit-hookin pylint-ajo (totta, näkyi commitin tulosteessa) ja netstat-komento Windowsilla (toimii). Tiedosto on englanniksi, vaikka koodin kommentit ovat suomeksi; jätin sen niin.
 
-Dependencies are managed with `uv`; run everything through `uv run`.
+Noudattiko agentti pyyntöä kirjoittaa testit ennen toteutusta?
 
-**Start the app** (from `src/`, on port 5000, which is what the tests expect):
+Kyllä, kummassakin storyssa ilman muistuttamista. Järjestys oli: lisää testit → aja → raportoi hajonneet → toteuta → aja uudelleen. Story 1:ssä hajosi kaksi hylkäystestiä, story 2:ssa yksi. Hyväksymistestit menivät läpi jo ennen toteutusta, mikä on oikein: ne vartioivat, ettei tarkistus hylkää liikaa.
 
-```
-cd src && uv run flask --app app run --port 5000 --debug
-```
+Kuinka paljon jouduit ohjaamaan agenttia matkan varrella?
 
-Note: `src/index.py` starts the app on port **5001**, but `src/AppLibrary.py` and
-`src/tests/resource.robot` are hardcoded to port **5000**. Running `python src/index.py`
-therefore does not work with the test suite as-is. Use the `flask run` command above,
-or check that nothing stale is already listening on 5000 (`netstat -ano | findstr :5000`).
-Tests silently run against whatever is on that port.
+Vähän, kahdessa kohdassa. Ensimmäisellä ajolla hajosi myös kaksi vanhaa tehtävän 7 testiä. Agentti huomasi, että portissa 5000 pyöri vanha, validoimaton kopio sovelluksesta edellisestä sessiosta, eikä tappanut sitä omin päin vaan kysyi. Valitsin vanhan prosessin lopettamisen ja käynnistyksen flask run --port 5000 -komennolla, jolloin koodiin ei koskettu. Toinen kohta: keskeytin komennon, joka niputti kolme rikkomista yhteen. Keskeytys jätti tiedoston rikottuun tilaan, minkä agentti kertoi heti; sen jälkeen rikkomiset ajettiin yksi kerrallaan. git diff näytti, että agentti muutti vain kahta tiedostoa eikä koskenut mihinkään ylimääräiseen.
 
-**Run the Robot Framework tests** (the app must be running first):
+Hajosivatko testit, kun rikoit toteutuksen tarkoituksella?
 
-```
-uv run robot --variable HEADLESS:true src/tests          # whole suite, headless
-uv run robot src/tests                                    # visible browser, 500ms slowMo
-uv run robot --variable HEADLESS:true src/tests/register.robot   # one suite
-uv run robot --variable HEADLESS:true -t "Register With Too Short*" src/tests  # one test
-```
+Kyllä, kaikilla kolmella kerralla:
 
-Robot writes `output.xml`, `log.html` and `report.html` into the cwd; pass
-`--outputdir <dir>` to keep them out of the repo.
+Rikkominen	Hajonneet testit
+isalpha()-tarkistus pois	2 (kallekalle, KalleKalle)
+Vahvistuksen tarkistus pois	1 (eroavat salasanat)
+Hylätään vain pienet kirjaimet	1 (KalleKalle)
+Kolmas oli opettavaisin: se osoitti, ettei "KalleKalle"-testi ole turha kopio, vaan nappaa liian kapean toteutuksen. Lopuksi koko sarja ajettiin palautetulla koodilla: 15/15 läpi.
 
-A pre-commit hook runs pylint on committed Python files.
+Mitä uutta opit?
 
-## Architecture
-
-Flask app with a three-layer structure under `src/`, all state in memory:
-
-- `app.py` — routes. Each POST handler calls a service method, catches `Exception`,
-  `flash`es the message and redirects back to the form. Templates render flashed
-  messages, which is what the tests assert on. Success redirects to `/welcome`
-  (register) or `/ohtu` (login).
-- `services/user_service.py` — `UserService.validate()` is the single place where
-  registration rules live (username length, uniqueness, password length, content,
-  confirmation). It raises `UserInputError` with the exact string the Robot tests
-  look for, so error messages are effectively part of the test contract.
-- `repositories/user_repository.py` — in-memory list of `User` entities; module-level
-  singleton `user_repository`. `delete_all()` backs the `/tests/reset` endpoint.
-
-**Test setup:** Robot tests in `src/tests/` are end-to-end through a real browser
-(`robotframework-browser`). `resource.robot` holds shared keywords and URLs.
-`AppLibrary.py` is a Python keyword library that talks to the running app over HTTP:
-`Reset Application` hits `/tests/reset`, `Create User` POSTs to `/register`. Every
-test that needs a known user calls both in its `Test Setup`, so tests are independent
-and order does not matter. The suite does not start the app itself.
-
-Adding a registration rule means: add a test to `register.robot` asserting on the
-message, then add the check and message to `validate()`.
+Testit testaavat sitä, mikä vastaa portissa, ei sitä mitä editorissa on auki. Unohtunut vanha prosessi tekee tuloksista valetta ilman virheilmoitusta.
+Punainen vaihe on diagnostiikkaa: se, mitkä testit hajoavat, paljasti ympäristöongelman, joka olisi muuten jäänyt huomaamatta.
+Yhteen kriteeriin kohdistuva mutaatio (islower()) kertoo testien laadusta; koko tarkistuksen poisto kertoo vain, että testit ovat olemassa.
+Virheilmoitusten tekstit ovat osa sopimusta: ne elävät sekä testeissä että koodissa ja muutetaan yhdessä.
+Agentin pysähtyminen kysymään oli arvokkaampaa kuin nopeus. Se olisi voinut "korjata" portin muokkaamalla index.py:tä tai tappamalla prosessin, ja kumpikaan ei ollut pyydetty muutos.
