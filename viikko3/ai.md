@@ -1,81 +1,122 @@
 # Raportti: rekisteröitymisen storyt agentin avulla
 
-## Mitä tehtiin
-
 Toteutin Claude Code -agentin avulla kaksi user storya login-sovellukseen:
 
 1. Salasana ei saa koostua pelkästään kirjaimista
 2. Salasanan ja salasanan vahvistuksen on oltava samat
 
-Kummankin storyn kohdalla agentti kirjoitti ensin hyväksymiskriteerit Robot
-Framework -testeiksi tiedostoon `register.robot`, ajoi testit ja osoitti niiden
-hajoavan. Vasta sen jälkeen se lisäsi tarkistukset `user_service.py`:n
-`validate`-metodiin ja ajoi testit uudelleen. Lopputulos: 15 testiä, kaikki läpi.
+Kummankin kohdalla agentti kirjoitti ensin hyväksymiskriteerit Robot Framework
+-testeiksi `register.robot`-tiedostoon, ajoi testit ja osoitti niiden hajoavan,
+ja vasta sitten lisäsi tarkistukset `user_service.py`:n `validate`-metodiin.
+Lopputulos: 15 testiä, kaikki läpi, kaksi committia.
 
-## Ongelma: testit osuivat väärään palvelimeen
+## Minkälaisen ohjetiedoston agentti generoi, ja mitä jouduit korjaamaan?
 
-Ensimmäisellä ajolla tulokset olivat sekavia: uudet hylkäystestit hajosivat
-odotetusti, mutta myös kaksi tehtävän 7 vanhaa testiä hajosi, vaikka ne olivat
-aiemmin menneet läpi. Agentti huomasi, että `index.py` käynnistää sovelluksen
-porttiin 5001, mutta `AppLibrary.py` ja `resource.robot` olettavat portin 5000.
-Portissa 5000 pyöri vanha, validoimaton instanssi samasta sovelluksesta, joka
-oli jäänyt päälle aiemmasta sessiosta. Testit siis ajettiin koodia vasten, joka
-ei sisältänyt edes tehtävän 7 tarkistuksia.
+Projektissa ei ollut ohjetiedostoa ennen storyjen toteutusta; agentti teki työn
+pelkän tehtävänannon ja koodin lukemisen varassa. Generoin `CLAUDE.md`:n vasta
+raporttia kirjoittaessa `/init`-komennolla, jotta voin verrata sitä siihen, mitä
+agentti joutui itse selvittämään matkan varrella.
 
-Agentti ei tappanut vierasta prosessia omin päin vaan kysyi. Hyväksyin vanhan
-prosessin lopettamisen ja sovelluksen käynnistämisen porttiin 5000 komennolla
-`flask --app app run --port 5000 --debug`, jolloin koodiin ei tarvinnut koskea.
-Tämän jälkeen tulokset olivat järkeviä. Opetus: jos testit hajoavat "mahdottomalla"
-tavalla, kannattaa ensin varmistaa, että ne ylipäätään testaavat sitä koodia,
-jota luulee.
+Tiedostosta tuli lyhyt, kaksi osiota:
 
-## Muutoksen läpikäynti
+- **Commands:** sovelluksen käynnistys porttiin 5000 `flask run` -komennolla,
+  testien ajo kokonaisuutena, yhden suiten ja yhden testin ajo
+  `-t "nimi*"` -valitsimella, sekä `HEADLESS`-muuttujan käyttö.
+- **Architecture:** kolmikerroksinen rakenne (`app.py` → `user_service` →
+  `user_repository`), virheilmoitusten kulku `flash`-viesteinä templateihin,
+  ja se että `validate()`-metodin virhetekstit ovat osa testien sopimusta.
+  Lisäksi selitys siitä, miten `AppLibrary.py` nollaa sovelluksen tilan
+  `/tests/reset`-reitin kautta ennen jokaista testiä.
 
-Kävin muutokset läpi `git diff` -komennolla. Agentti oli muuttanut vain kahta
-tiedostoa: `user_service.py` sai kaksi uutta `if`-lausetta ja `register.robot`
-kuusi uutta testiä. Se ei korjannut porttiristiriitaa koodissa, ei lisännyt
-docstringeja, vaikka linter valitti niistä, eikä refaktoroinut mitään ympäriltä.
-Mitään poistettavaa ei jäänyt.
+Huomionarvoisinta on, että tiedosto varoittaa porttiristiriidasta: `index.py`
+käynnistää sovelluksen porttiin 5001, mutta testit ja `AppLibrary.py` olettavat
+porttia 5000. Tämä oli juuri se asia, johon agentti kompastui storyja
+toteuttaessaan (ks. alla). Ohjetiedosto ei siis sisällä mitään, mitä koodista
+ei voisi lukea, mutta se säästää seuraavalta sessiolta sen puolen tunnin
+kompastelun, joka tähän sessioon kului.
 
-## Miten voin olla varma, että testit testaavat uutta toiminnallisuutta?
+Korjattavaa jäi vähän, koska tiedosto on lyhyt ja perustuu koodiin, jonka agentti
+oli juuri lukenut. Kaksi asiaa, jotka tarkistin erikseen: väite pre-commit-hookin
+pylint-ajosta piti paikkansa (se näkyi commitin tulosteessa), ja porttiohjeessa
+mainittu `netstat`-komento toimii Windowsilla. Tiedosto on englanniksi, vaikka
+koodin kommentit ovat suomeksi; jätin sen niin, koska agentti lukee kumpaakin.
 
-Kahdella tavalla:
+## Noudattiko agentti pyyntöä kirjoittaa testit ennen toteutusta?
 
-1. **Punainen ennen vihreää.** Testit ajettiin ennen toteutusta, ja ne hajosivat
-   täsmälleen oikeista kohdista: story 1:ssä kaksi hylkäystestiä, story 2:ssa
-   yksi. Hyväksymistestit ("kalle123" ja "kalle#abc" hyväksytään, samat salasanat
-   hyväksytään) menivät läpi jo ennen toteutusta, mikä on oikein: ne vartioivat,
-   ettei uusi tarkistus hylkää liikaa. Jos testi menee läpi ennen toteutusta ja
-   sen jälkeen, se ei yksinään todista mitään uudesta koodista.
+Kyllä, kummassakin storyssa ilman muistuttamista. Järjestys oli joka kerta:
+lisää testit → aja koko testisarja → raportoi mitkä hajosivat → lisää tarkistus
+→ aja uudelleen. Story 1:ssä hajosi kaksi hylkäystestiä (kallekalle, KalleKalle)
+ja story 2:ssa yksi (eroavat salasanat). Hyväksymistestit ("kalle123",
+"kalle#abc", samat salasanat) menivät läpi jo ennen toteutusta, mikä on oikein:
+ne vartioivat, ettei uusi tarkistus hylkää liikaa.
 
-2. **Tarkoituksellinen rikkominen.** Rikoin toteutuksen kolmella tavalla ja ajoin
-   testit joka kerta:
+Tämä järjestys osoittautui tärkeäksi ensimmäisellä ajolla, kun hajosi myös kaksi
+vanhaa tehtävän 7 testiä. Jos testit olisi kirjoitettu toteutuksen jälkeen,
+ne olisivat todennäköisesti menneet läpi ja porttiongelma olisi jäänyt huomaamatta.
 
-   | Rikkominen | Hajonneet testit |
-   |---|---|
-   | `isalpha()`-tarkistus pois (`if False:`) | 2: kallekalle ja KalleKalle |
-   | Vahvistuksen tarkistus pois (`if False:`) | 1: eroavat salasanat |
-   | Hylätään vain pienet kirjaimet (`isalpha() and islower()`) | 1: KalleKalle |
+## Kuinka paljon jouduit ohjaamaan agenttia matkan varrella?
 
-   Kolmas rikkominen oli kiinnostavin: se osoittaa, että "KalleKalle"-testi ei
-   ole turha kopio "kallekalle"-testistä, vaan nappaa kiinni toteutuksen, joka
-   olisi tulkinnut vaatimuksen liian kapeasti.
+Vähän, mutta kahdessa kohdassa.
 
-Jokaisen rikkomisen jälkeen tiedosto palautettiin varmuuskopiosta ja lopuksi
-koko testisarja ajettiin vielä kerran: 15/15 läpi.
+**Portti.** Agentti huomasi itse, että portissa 5000 pyöri vanha, validoimaton
+kopio samasta sovelluksesta edellisestä sessiosta, ja että `index.py` käynnistää
+uuden kopion porttiin 5001. Testit ajettiin siis koodia vasten, jossa ei ollut
+edes tehtävän 7 tarkistuksia. Agentti ei tappanut prosessia omin päin vaan kysyi
+kolmesta vaihtoehdosta. Valitsin vanhan prosessin lopettamisen ja sovelluksen
+käynnistämisen `flask run --port 5000` -komennolla, jolloin koodiin ei tarvinnut
+koskea. Tässä ohjaus oli yksi valinta, ei korjaus.
 
-## Huomioita agentin kanssa työskentelystä
+**Rikkomisvaihe.** Keskeytin komennon, joka niputti kolme rikkomista ja kolme
+testiajoa yhteen, koska halusin tietää kauanko se kestää. Keskeytys jätti
+`user_service.py`:n rikottuun tilaan (vahvistuksen tarkistus oli `if False:`),
+minkä agentti kertoi heti ja osoitti varmuuskopion sijainnin. Sen jälkeen
+rikkomiset ajettiin yksi per komento, mikä oli helpompi lukea ja hyväksyä.
 
-- Agentti noudatti "testit ensin" -järjestystä ilman, että sitä piti muistuttaa,
-  ja ajoi testit itse kummassakin vaiheessa.
-- Suurin arvo tuli siitä, että agentti huomasi porttiongelman ja pysähtyi
-  kysymään sen sijaan, että olisi "korjannut" sen muuttamalla koodia tai
-  tappamalla prosessin itse.
-- Keskeytin rikkomisvaiheen komennon, koska se niputti kolme testiajoa yhteen
-  komentoon ja mietin kauanko se kestää. Keskeytys jätti tiedoston rikottuun
-  tilaan, minkä agentti kertoi heti. Yksi rikkominen per komento oli selkeämpi
-  hyväksyä ja seurata.
-- Virheilmoitusten sanamuodot ("Password must not consist of letters only",
-  "Password and password confirmation do not match") olivat agentin keksimiä,
-  koska storyt eivät määrittäneet niitä. Ne näkyvät sekä testeissä että
-  koodissa, joten ne pitää vaihtaa molemmista, jos haluaa toisenlaiset.
+Muuten ohjaus oli vain komentojen hyväksymistä. `git diff` näytti, että agentti
+muutti vain kahta tiedostoa: kaksi `if`-lausetta `user_service.py`:hyn ja kuusi
+testiä `register.robot`-tiedostoon. Se ei korjannut porttiristiriitaa koodissa,
+ei lisännyt docstringeja vaikka linter valitti niistä, eikä refaktoroinut mitään.
+Poistettavaa ei jäänyt.
+
+## Hajosivatko testit, kun rikoit toteutuksen tarkoituksella?
+
+Kyllä, jokaisella kolmella kerralla:
+
+| Rikkominen | Hajonneet testit |
+|---|---|
+| `isalpha()`-tarkistus pois (`if False:`) | 2: kallekalle ja KalleKalle |
+| Vahvistuksen tarkistus pois (`if False:`) | 1: eroavat salasanat |
+| Hylätään vain pienet kirjaimet (`isalpha() and islower()`) | 1: KalleKalle |
+
+Kolmas rikkominen oli opettavaisin. Se osoittaa, että "KalleKalle"-testi ei ole
+turha kopio "kallekalle"-testistä: se nappaa kiinni toteutuksen, joka tulkitsee
+vaatimuksen liian kapeasti. Ilman sitä kaksi ensimmäistä testiä olisivat
+päästäneet läpi tarkistuksen, joka hyväksyy "KalleKalle"-tyyppiset salasanat.
+
+Jokaisen rikkomisen jälkeen tiedosto palautettiin varmuuskopiosta, ja lopuksi
+koko sarja ajettiin vielä kerran: 15/15 läpi.
+
+## Mitä uutta opit?
+
+- **Testit testaavat sitä, mikä vastaa portissa, eivät sitä, mitä editorissa on
+  auki.** Robot-testit eivät käynnistä sovellusta itse, joten unohtunut vanha
+  prosessi tekee testituloksista valetta ilman yhtäkään virheilmoitusta.
+  "Mahdottomat" tulokset (vanhat testit hajoavat ilman muutosta) ovat merkki
+  tästä, eivät bugista koodissa.
+
+- **Punainen vaihe on diagnostiikkaa, ei rituaali.** Se, *mitkä* testit hajoavat
+  ennen toteutusta, kertoo enemmän kuin se, että joku hajoaa. Tässä se paljasti
+  ympäristöongelman, jota ei muuten olisi huomattu.
+
+- **Mutaatio, joka kohdistuu yhteen hyväksymiskriteeriin kerrallaan, on
+  hyödyllisempi kuin koko tarkistuksen poisto.** `islower()`-rikkominen kertoi
+  jotain testien laadusta; `if False:` kertoi vain, että testit ovat olemassa.
+
+- **Virheilmoitusten tekstit ovat osa sopimusta.** Storyt eivät määritelleet
+  sanamuotoja, joten agentti keksi ne. Ne elävät nyt sekä testeissä että
+  koodissa ja pitää muuttaa molemmista yhtä aikaa. Tämä päätyi myös
+  `CLAUDE.md`:hen.
+
+- **Agentin pysähtyminen kysymään on arvokkaampaa kuin sen nopeus.** Portin
+  kohdalla agentti olisi voinut "korjata" tilanteen muokkaamalla `index.py`:tä
+  tai tappamalla prosessin, ja kumpikin olisi ollut muutos, jota en pyytänyt.
