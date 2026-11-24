@@ -13,6 +13,6 @@ print(f"{x} * {y} = {tulo(x, y)}")
 
 logger("lopetetaan")
 print("goodbye!")
-print("asjdlsajdlsajldjasldjsljdls")
 
-#ahello world everyone in heresadnmsaldjsaldjslakdlksjad
+
+#ahello world everyone in here
